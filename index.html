@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Open Stratus Application</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background: #ffffff;
+    color: #1f2937;
+  }
+  #wrap {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  #statusBar {
+    padding: 10px 14px;
+    font-size: 13px;
+    border-bottom: 1px solid #e5e7eb;
+    color: #4b5563;
+    flex: 0 0 auto;
+  }
+  #statusBar.error {
+    color: #b91c1c;
+    background: #fef2f2;
+  }
+  #frameHolder {
+    flex: 1 1 auto;
+    position: relative;
+  }
+  #frameHolder iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+  }
+  #actionBar {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 10px 14px;
+    border-top: 1px solid #e5e7eb;
+  }
+  button {
+    font-size: 14px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid #d1d5db;
+    background: #fff;
+    cursor: pointer;
+  }
+  button.primary {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+  }
+  button.primary:disabled {
+    background: #93c5fd;
+    border-color: #93c5fd;
+    cursor: not-allowed;
+  }
+  button:hover:not(:disabled) {
+    filter: brightness(0.97);
+  }
+  #placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #6b7280;
+    font-size: 14px;
+    padding: 24px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="statusBar">Loading application...</div>
+  <div id="frameHolder">
+    <div id="placeholder">Waiting for record data from Zoho...</div>
+  </div>
+  <div id="actionBar">
+    <button id="cancelBtn">Cancel</button>
+    <button id="continueBtn" class="primary" disabled>I've started the application &mdash; Continue</button>
+  </div>
+</div>
+
+<!--
+  Zoho CRM Widget JS SDK.
+  NOTE: verify this script src / version against your org's current Developer
+  Space widget template before shipping — Zoho periodically revs the SDK path
+  (currently believed to be /js-sdk/1.1/ or /js-sdk/1.2/ under live.zwidgets.com).
+-->
+<script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
+
+<script>
+(function () {
+  var APPLICATION_URL_FIELD = "Application_URL"; // Lead field confirmed live 2026-08-25
+  var statusBar = document.getElementById("statusBar");
+  var frameHolder = document.getElementById("frameHolder");
+  var continueBtn = document.getElementById("continueBtn");
+  var cancelBtn = document.getElementById("cancelBtn");
+
+  var currentModule = null;
+  var currentRecordId = null;
+
+  function setStatus(msg, isError) {
+    statusBar.textContent = msg;
+    statusBar.className = isError ? "error" : "";
+  }
+
+  function renderIframe(url) {
+    frameHolder.innerHTML = "";
+    var iframe = document.createElement("iframe");
+    iframe.src = url;
+    // Stratus's hosted application page is confirmed to allow framing
+    // (checked 2026-08-25). If that ever changes, replace this iframe
+    // with a redirect / "open in new tab" link instead.
+    frameHolder.appendChild(iframe);
+    continueBtn.disabled = false;
+    setStatus("Application loaded. Have the merchant/rep complete it, then click Continue.");
+  }
+
+  function renderMissingUrl() {
+    frameHolder.innerHTML =
+      '<div id="placeholder">No application URL found on this Lead yet.<br>' +
+      "The Interested&rarr;Proposal step should have created one automatically &mdash; " +
+      "check that step ran before retrying this transition.</div>";
+    setStatus(APPLICATION_URL_FIELD + " is empty on this record.", true);
+  }
+
+  // Guard: if the Zoho widget SDK script above didn't load (network issue,
+  // wrong version, or this page being opened outside a real Zoho CRM widget
+  // context), fail loudly on-screen instead of hanging on "Loading
+  // application..." forever with only a console error to explain why.
+  if (typeof ZOHO === "undefined") {
+    setStatus(
+      "This page must be opened inside a Zoho CRM widget, not previewed standalone " +
+        "(the Zoho SDK script did not load).",
+      true
+    );
+    frameHolder.innerHTML =
+      '<div id="placeholder">Zoho SDK not detected.<br>' +
+      "Test this by attaching it to the blueprint transition in Zoho CRM " +
+      "(sandbox), not by opening this file directly.</div>";
+    return;
+  }
+
+  // 1. Wait for Zoho to hand us the record context.
+  ZOHO.embeddedApp.on("PageLoad", function (data) {
+    currentModule = data.Entity;       // e.g. "Leads"
+    currentRecordId = data.EntityId;   // the Lead's record id
+
+    // 2. Read the Application URL field that the Interested->Proposal
+    //    custom function should already have populated.
+    ZOHO.CRM.API.getRecord({
+      Entity: currentModule,
+      RecordID: currentRecordId
+    }).then(function (response) {
+      var record = response && response.data && response.data[0];
+      var url = record ? record[APPLICATION_URL_FIELD] : null;
+
+      if (url) {
+        renderIframe(url);
+      } else {
+        renderMissingUrl();
+      }
+    }).catch(function (err) {
+      setStatus("Could not load this record from Zoho.", true);
+      console.error("getRecord failed:", err);
+    });
+  });
+
+  // 3. Rep confirms the application was actually opened/started ->
+  //    advance the blueprint into "Application Started".
+  //    NOTE: verify ZOHO.CRM.BLUEPRINT.proceed() against the current
+  //    Zoho widget SDK reference (zohocrm.dev) before relying on this in
+  //    production — confirmed to exist per Zoho's Kaizen #95 writeup, but
+  //    the exact call signature should be double-checked in sandbox.
+  continueBtn.addEventListener("click", function () {
+    continueBtn.disabled = true;
+    setStatus("Advancing to Application Started...");
+    ZOHO.CRM.BLUEPRINT.proceed()
+      .then(function () {
+        setStatus("Done.");
+      })
+      .catch(function (err) {
+        continueBtn.disabled = false;
+        setStatus("Could not advance the blueprint — try again.", true);
+        console.error("BLUEPRINT.proceed failed:", err);
+      });
+  });
+
+  cancelBtn.addEventListener("click", function () {
+    if (ZOHO.CRM.UI && ZOHO.CRM.UI.Popup && ZOHO.CRM.UI.Popup.close) {
+      ZOHO.CRM.UI.Popup.close();
+    }
+  });
+
+  ZOHO.embeddedApp.init();
+})();
+</script>
+</body>
+</html>

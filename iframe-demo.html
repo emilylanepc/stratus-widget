@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Open Stratus Application (iframe demo)</title>
+<title>Open KurvAgent Application (iframe demo)</title>
 <style>
   html, body {
     margin: 0;
@@ -93,14 +93,14 @@
 </div>
 
 <!-- DEMO ONLY: this is the original iframe version, kept for comparison.
-     It hits a CSRF Token Mismatch on Stratus's login because the browser
-     blocks Stratus's session cookie inside a third-party iframe. This is
+     It hits a CSRF Token Mismatch on KurvAgent's login because the browser
+     blocks KurvAgent's session cookie inside a third-party iframe. This is
      not the version wired into the live blueprint transition. -->
 <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
 
 <script>
 (function () {
-  var STRATUS_URL = "https://agent.kurvpay.com/";
+  var KURVAGENT_URL = "https://agent.kurvpay.com/";
 
   var statusBar = document.getElementById("statusBar");
   var frameHolder = document.getElementById("frameHolder");
@@ -122,7 +122,7 @@
     iframe.src = url;
     frameHolder.appendChild(iframe);
     continueBtn.disabled = false;
-    setStatus("Log in and set up this merchant in Stratus, then click Continue.");
+    setStatus("Log in and set up this merchant in KurvAgent, then click Continue.");
   }
 
   if (typeof ZOHO === "undefined") {
@@ -141,7 +141,7 @@
   ZOHO.embeddedApp.on("PageLoad", function (data) {
     currentModule = data.Entity;
     currentRecordId = data.EntityId;
-    renderIframe(STRATUS_URL);
+    renderIframe(KURVAGENT_URL);
   });
 
   continueBtn.addEventListener("click", function () {
@@ -163,7 +163,7 @@
   });
 
   reloadBtn.addEventListener("click", function () {
-    renderIframe(STRATUS_URL);
+    renderIframe(KURVAGENT_URL);
   });
 
   cancelBtn.addEventListener("click", function () {

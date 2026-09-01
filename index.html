@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Open Stratus Application</title>
+<title>Open KurvAgent Application</title>
 <style>
   html, body {
     margin: 0;
@@ -83,8 +83,8 @@
 <div id="wrap">
   <div id="statusBar">Loading...</div>
   <div id="main">
-    <p>This opens Stratus in a new tab so you can log in and set up the merchant (pricing, equipment, etc.).</p>
-    <button id="openBtn" class="primary">Open Stratus</button>
+    <p>This opens KurvAgent in a new tab so you can log in and set up the merchant (pricing, equipment, etc.).</p>
+    <button id="openBtn" class="primary">Open KurvAgent</button>
   </div>
   <div id="actionBar">
     <button id="cancelBtn">Cancel</button>
@@ -102,17 +102,17 @@
 
 <script>
 (function () {
-  // 2026-08-25: switched from an iframe to opening Stratus in a new tab.
-  // Stratus's login relies on a session cookie that browsers block inside a
+  // 2026-08-25: switched from an iframe to opening KurvAgent in a new tab.
+  // KurvAgent's login relies on a session cookie that browsers block inside a
   // third-party iframe (confirmed CSRF Token Mismatch). Their dev can't
   // relax that cookie's SameSite setting without risking a pentest finding,
   // so the iframe route is off the table for good. Opening in a normal tab
   // sidesteps the issue entirely since it's no longer a cross-site embed.
   //
   // Application_URL is not written by this widget — that's still meant to
-  // come back automatically via a future Stratus-side webhook (see plan doc).
-  var STRATUS_URL = "https://agent.kurvpay.com/";
-  var STRATUS_TAB_NAME = "stratusApplicationTab"; // reuse the same tab on repeat clicks
+  // come back automatically via a future KurvAgent-side webhook (see plan doc).
+  var KURVAGENT_URL = "https://agent.kurvpay.com/";
+  var KURVAGENT_TAB_NAME = "kurvAgentApplicationTab"; // reuse the same tab on repeat clicks
 
   var statusBar = document.getElementById("statusBar");
   var openBtn = document.getElementById("openBtn");
@@ -148,17 +148,17 @@
   ZOHO.embeddedApp.on("PageLoad", function (data) {
     currentModule = data.Entity;       // e.g. "Leads"
     currentRecordId = data.EntityId;   // the Lead's record id
-    setStatus("Ready. Click \"Open Stratus\" to log in and set up this merchant.");
+    setStatus("Ready. Click \"Open KurvAgent\" to log in and set up this merchant.");
   });
 
-  // 2. Rep clicks "Open Stratus" -> opens in a real new tab (not embedded),
+  // 2. Rep clicks "Open KurvAgent" -> opens in a real new tab (not embedded),
   //    which avoids the cross-site cookie issue entirely. Using a named
   //    target means clicking it again reuses the same tab instead of
   //    spawning a new one each time.
   openBtn.addEventListener("click", function () {
-    window.open(STRATUS_URL, STRATUS_TAB_NAME);
+    window.open(KURVAGENT_URL, KURVAGENT_TAB_NAME);
     continueBtn.disabled = false;
-    setStatus("Log in and set up this merchant in the Stratus tab, then come back here and click Continue.");
+    setStatus("Log in and set up this merchant in the KurvAgent tab, then come back here and click Continue.");
   });
 
   // 3. Rep confirms the application was actually opened/started ->

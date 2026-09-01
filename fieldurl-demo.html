@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Open Stratus Application (Application_URL demo)</title>
+<title>Open KurvAgent Application (Application_URL demo)</title>
 <style>
   html, body {
     margin: 0;
@@ -93,7 +93,7 @@
 </div>
 
 <!-- DEMO ONLY: this version reads the Lead's Application_URL field and uses
-     that as the iframe link, instead of a static Stratus URL. This is the
+     that as the iframe link, instead of a static KurvAgent URL. This is the
      approach from before the pivot — kept here only so it can be shown
      side by side with the other two versions. It has the same CSRF/cookie
      issue as the plain iframe demo, since it's still an iframe embed. -->
@@ -124,7 +124,7 @@
     iframe.src = url;
     frameHolder.appendChild(iframe);
     continueBtn.disabled = false;
-    setStatus("Log in and set up this merchant in Stratus, then click Continue.");
+    setStatus("Log in and set up this merchant in KurvAgent, then click Continue.");
   }
 
   if (typeof ZOHO === "undefined") {
@@ -142,7 +142,7 @@
 
   // 1. Wait for Zoho to hand us the record context, then look up the
   //    Lead's Application_URL field and use that as the iframe link
-  //    instead of a fixed Stratus URL.
+  //    instead of a fixed KurvAgent URL.
   ZOHO.embeddedApp.on("PageLoad", function (data) {
     currentModule = data.Entity;
     currentRecordId = data.EntityId;

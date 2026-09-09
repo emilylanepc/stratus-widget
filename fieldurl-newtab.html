@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Open KurvAgent Application</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background: #ffffff;
+    color: #1f2937;
+  }
+  #wrap {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  #statusBar {
+    padding: 10px 14px;
+    font-size: 13px;
+    border-bottom: 1px solid #e5e7eb;
+    color: #4b5563;
+    flex: 0 0 auto;
+  }
+  #statusBar.error {
+    color: #b91c1c;
+    background: #fef2f2;
+  }
+  #main {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 24px;
+    text-align: center;
+  }
+  #main p {
+    color: #6b7280;
+    font-size: 14px;
+    max-width: 360px;
+    margin: 0;
+  }
+  #actionBar {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 10px 14px;
+    border-top: 1px solid #e5e7eb;
+  }
+  button {
+    font-size: 14px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid #d1d5db;
+    background: #fff;
+    cursor: pointer;
+  }
+  button.primary {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+  }
+  button.primary:disabled {
+    background: #93c5fd;
+    border-color: #93c5fd;
+    cursor: not-allowed;
+  }
+  button:hover:not(:disabled) {
+    filter: brightness(0.97);
+  }
+  #openBtn {
+    font-size: 16px;
+    padding: 12px 24px;
+    background: #22a276;
+    border-color: #22a276;
+  }
+  #openBtn:disabled {
+    background: #8fd0b8;
+    border-color: #8fd0b8;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="statusBar">Loading...</div>
+  <div id="main">
+    <p id="mainText">Looking up this Lead's application link...</p>
+    <button id="openBtn" class="primary" style="display:none">Open Application</button>
+  </div>
+  <div id="actionBar">
+    <button id="cancelBtn">Cancel</button>
+    <button id="continueBtn" class="primary" disabled>I've started the application &mdash; Continue</button>
+  </div>
+</div>
+
+<!--
+  Zoho CRM Widget JS SDK.
+  NOTE: verify this script src / version against your org's current Developer
+  Space widget template (matches the version used in the other KurvAgent
+  widgets in this repo).
+-->
+<script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
+
+<script>
+(function () {
+  // Opens the Lead's own Application_URL field value in a new tab (not a
+  // static KurvAgent link, not an iframe). Use this on records where the
+  // application already exists in KurvAgent and has a real, unique
+  // Application_URL saved on the Lead.
+  var APPLICATION_URL_FIELD = "Application_URL";
+  var FALLBACK_URL = "https://agent.kurvpay.com/"; // used when Application_URL is empty
+
+  var statusBar = document.getElementById("statusBar");
+  var mainText = document.getElementById("mainText");
+  var openBtn = document.getElementById("openBtn");
+  var continueBtn = document.getElementById("continueBtn");
+  var cancelBtn = document.getElementById("cancelBtn");
+
+  var currentModule = null;
+  var currentRecordId = null;
+  var applicationUrl = null;
+
+  function setStatus(msg, isError) {
+    statusBar.textContent = msg;
+    statusBar.className = isError ? "error" : "";
+  }
+
+  if (typeof ZOHO === "undefined") {
+    setStatus(
+      "This page must be opened inside a Zoho CRM widget, not previewed standalone.",
+      true
+    );
+    mainText.textContent = "Zoho SDK not detected.";
+    return;
+  }
+
+  ZOHO.embeddedApp.on("PageLoad", function (data) {
+    currentModule = data.Entity;
+    currentRecordId = data.EntityId;
+
+    setStatus("Loading application link from " + APPLICATION_URL_FIELD + "...");
+
+    ZOHO.CRM.API.getRecord({ Entity: currentModule, RecordID: currentRecordId })
+      .then(function (response) {
+        var record = response.data[0];
+        applicationUrl = record[APPLICATION_URL_FIELD];
+
+        if (!applicationUrl) {
+          // No Application_URL yet — fall back to opening KurvAgent directly
+          // so the rep can still log in and create the application manually.
+          applicationUrl = FALLBACK_URL;
+          setStatus("No " + APPLICATION_URL_FIELD + " found yet — opening KurvAgent instead.");
+          mainText.textContent = "This Lead doesn't have an application link yet. Click below to open KurvAgent and set it up manually.";
+          openBtn.textContent = "Open KurvAgent";
+          openBtn.style.display = "inline-block";
+          return;
+        }
+
+        setStatus("Ready.");
+        mainText.textContent = "Click below to open this Lead's application in a new tab.";
+        openBtn.textContent = "Open Application";
+        openBtn.style.display = "inline-block";
+      })
+      .catch(function (err) {
+        setStatus("Could not load the record from Zoho.", true);
+        console.error("getRecord failed:", err);
+      });
+  });
+
+  openBtn.addEventListener("click", function () {
+    if (!applicationUrl) return;
+    window.open(applicationUrl, "_blank");
+    continueBtn.disabled = false;
+    setStatus("Opened in a new tab. Come back here and click Continue when you're done.");
+  });
+
+  continueBtn.addEventListener("click", function () {
+    continueBtn.disabled = true;
+    setStatus("Advancing to Application Started...");
+    ZOHO.CRM.BLUEPRINT.proceed()
+      .then(function () {
+        if (ZOHO.CRM.UI.Popup && ZOHO.CRM.UI.Popup.closeReload) {
+          ZOHO.CRM.UI.Popup.closeReload();
+        } else {
+          setStatus("Done. Refresh the page to see the updated stage.");
+        }
+      })
+      .catch(function (err) {
+        continueBtn.disabled = false;
+        setStatus("Could not advance the blueprint — try again.", true);
+        console.error("BLUEPRINT.proceed failed:", err);
+      });
+  });
+
+  cancelBtn.addEventListener("click", function () {
+    if (ZOHO.CRM.UI && ZOHO.CRM.UI.Popup && ZOHO.CRM.UI.Popup.close) {
+      ZOHO.CRM.UI.Popup.close();
+    }
+  });
+
+  ZOHO.embeddedApp.init();
+})();
+</script>
+</body>
+</html>

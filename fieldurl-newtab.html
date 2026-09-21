@@ -52,19 +52,24 @@
     background: #fff;
     cursor: pointer;
   }
+  button.primary {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+  }
+  button.primary:disabled {
+    background: #93c5fd;
+    border-color: #93c5fd;
+    cursor: not-allowed;
+  }
   button:hover:not(:disabled) {
     filter: brightness(0.97);
-  }
-  button:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
   }
   #openBtn {
     font-size: 16px;
     padding: 12px 24px;
     background: #22a276;
     border-color: #22a276;
-    color: #fff;
   }
   #openBtn:disabled {
     background: #8fd0b8;
@@ -76,93 +81,90 @@
 <div id="wrap">
   <div id="statusBar">Loading...</div>
   <div id="main">
-    <p>This opens KurvAgent in a new tab so you can log in and set up the merchant (pricing, equipment, etc.).</p>
-    <button id="openBtn">Open KurvAgent</button>
+    <p id="mainText">Looking up this Lead's application link...</p>
+    <button id="openBtn" class="primary" style="display:none">Open Application</button>
   </div>
 </div>
 
 <!--
   Zoho CRM Widget JS SDK.
   NOTE: verify this script src / version against your org's current Developer
-  Space widget template before shipping — Zoho periodically revs the SDK path
-  (currently believed to be /js-sdk/1.1/ or /js-sdk/1.2/ under live.zwidgets.com).
+  Space widget template (matches the version used in the other KurvAgent
+  widgets in this repo).
 -->
 <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
 
 <script>
 (function () {
-  // 2026-08-25: switched from an iframe to opening KurvAgent in a new tab.
-  // KurvAgent's login relies on a session cookie that browsers block inside a
-  // third-party iframe (confirmed CSRF Token Mismatch). Their dev can't
-  // relax that cookie's SameSite setting without risking a pentest finding,
-  // so the iframe route is off the table for good. Opening in a normal tab
-  // sidesteps the issue entirely since it's no longer a cross-site embed.
-  //
-  // Application_URL is not written by this widget — that's still meant to
-  // come back automatically via a future KurvAgent-side webhook (see plan doc).
-  //
-  // 2026-09-21: merged the old two-step "Open KurvAgent" -> "Continue" flow
-  // into a single click. Opening the tab and advancing the blueprint now
-  // happen together on openBtn — there is no longer a separate confirmation
-  // step, so the blueprint advances the moment a rep clicks Open KurvAgent,
-  // not after they confirm they actually did something in that tab.
-  var KURVAGENT_URL = "https://agent.kurvpay.com/";
-  var KURVAGENT_TAB_NAME = "kurvAgentApplicationTab"; // reuse the same tab on repeat clicks
+  // Opens the Lead's own Application_URL field value in a new tab (not a
+  // static KurvAgent link, not an iframe). Use this on records where the
+  // application already exists in KurvAgent and has a real, unique
+  // Application_URL saved on the Lead.
+  var APPLICATION_URL_FIELD = "Application_URL";
+  var FALLBACK_URL = "https://agent.kurvpay.com/"; // used when Application_URL is empty
 
   var statusBar = document.getElementById("statusBar");
+  var mainText = document.getElementById("mainText");
   var openBtn = document.getElementById("openBtn");
 
   var currentModule = null;
   var currentRecordId = null;
+  var applicationUrl = null;
 
   function setStatus(msg, isError) {
     statusBar.textContent = msg;
     statusBar.className = isError ? "error" : "";
   }
 
-  // Guard: if the Zoho widget SDK script above didn't load (network issue,
-  // wrong version, or this page being opened outside a real Zoho CRM widget
-  // context), fail loudly on-screen instead of hanging on "Loading..."
-  // forever with only a console error to explain why.
   if (typeof ZOHO === "undefined") {
     setStatus(
-      "This page must be opened inside a Zoho CRM widget, not previewed standalone " +
-        "(the Zoho SDK script did not load).",
+      "This page must be opened inside a Zoho CRM widget, not previewed standalone.",
       true
     );
-    document.getElementById("main").innerHTML =
-      "<p>Zoho SDK not detected.<br>" +
-      "Test this by attaching it to the blueprint transition in Zoho CRM " +
-      "(sandbox), not by opening this file directly.</p>";
+    mainText.textContent = "Zoho SDK not detected.";
     return;
   }
 
-  // 1. Wait for Zoho to hand us the record context.
   ZOHO.embeddedApp.on("PageLoad", function (data) {
-    currentModule = data.Entity;       // e.g. "Leads"
-    currentRecordId = data.EntityId;   // the Lead's record id
-    setStatus("Ready. Click \"Open KurvAgent\" to log in and set up this merchant.");
+    currentModule = data.Entity;
+    currentRecordId = data.EntityId;
+
+    setStatus("Loading application link from " + APPLICATION_URL_FIELD + "...");
+
+    ZOHO.CRM.API.getRecord({ Entity: currentModule, RecordID: currentRecordId })
+      .then(function (response) {
+        var record = response.data[0];
+        applicationUrl = record[APPLICATION_URL_FIELD];
+
+        if (!applicationUrl) {
+          // No Application_URL yet — fall back to opening KurvAgent directly
+          // so the rep can still log in and create the application manually.
+          applicationUrl = FALLBACK_URL;
+          setStatus("No " + APPLICATION_URL_FIELD + " found yet — opening KurvAgent instead.");
+          mainText.textContent = "This Lead doesn't have an application link yet. Click below to open KurvAgent and set it up manually.";
+          openBtn.textContent = "Open KurvAgent";
+          openBtn.style.display = "inline-block";
+          return;
+        }
+
+        setStatus("Ready.");
+        mainText.textContent = "Click below to open this Lead's application in a new tab.";
+        openBtn.textContent = "Open Application";
+        openBtn.style.display = "inline-block";
+      })
+      .catch(function (err) {
+        setStatus("Could not load the record from Zoho.", true);
+        console.error("getRecord failed:", err);
+      });
   });
 
-  // 2. Rep clicks "Open KurvAgent" -> opens in a real new tab (not embedded),
-  //    which avoids the cross-site cookie issue entirely. Using a named
-  //    target means clicking it again reuses the same tab instead of
-  //    spawning a new one each time. Immediately after opening, advance the
-  //    blueprint — see the 2026-09-21 note above on what that tradeoff means.
-  //    NOTE: verify ZOHO.CRM.BLUEPRINT.proceed() against the current
-  //    Zoho widget SDK reference (zohocrm.dev) before relying on this in
-  //    production — confirmed to exist per Zoho's Kaizen #95 writeup, but
-  //    the exact call signature should be double-checked in sandbox.
   openBtn.addEventListener("click", function () {
-    window.open(KURVAGENT_URL, KURVAGENT_TAB_NAME);
-
+    if (!applicationUrl) return;
     openBtn.disabled = true;
-    setStatus("Advancing to Application Started...");
+    window.open(applicationUrl, "_blank");
+    setStatus("Opened in a new tab. Advancing to Application Started...");
     ZOHO.CRM.BLUEPRINT.proceed()
       .then(function () {
-        // Close the widget AND refresh the Lead record page, so the rep
-        // sees the new blueprint stage immediately instead of having to
-        // manually refresh the browser.
         if (ZOHO.CRM.UI.Popup && ZOHO.CRM.UI.Popup.closeReload) {
           ZOHO.CRM.UI.Popup.closeReload();
         } else {
@@ -171,7 +173,7 @@
       })
       .catch(function (err) {
         openBtn.disabled = false;
-        setStatus("Opened KurvAgent, but could not advance the blueprint — click Open KurvAgent again to retry.", true);
+        setStatus("Could not advance the blueprint — try again.", true);
         console.error("BLUEPRINT.proceed failed:", err);
       });
   });

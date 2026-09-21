@@ -44,14 +44,6 @@
     max-width: 360px;
     margin: 0;
   }
-  #actionBar {
-    flex: 0 0 auto;
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    padding: 10px 14px;
-    border-top: 1px solid #e5e7eb;
-  }
   button {
     font-size: 14px;
     padding: 8px 16px;
@@ -92,10 +84,6 @@
     <p>This opens KurvAgent in a new tab so you can log in and set up the merchant (pricing, equipment, etc.).</p>
     <button id="openBtn" class="primary">Open KurvAgent</button>
   </div>
-  <div id="actionBar">
-    <button id="cancelBtn">Cancel</button>
-    <button id="continueBtn" class="primary" disabled>I've started the application &mdash; Continue</button>
-  </div>
 </div>
 
 <!--
@@ -122,8 +110,6 @@
 
   var statusBar = document.getElementById("statusBar");
   var openBtn = document.getElementById("openBtn");
-  var continueBtn = document.getElementById("continueBtn");
-  var cancelBtn = document.getElementById("cancelBtn");
 
   var currentModule = null;
   var currentRecordId = null;
@@ -160,22 +146,17 @@
   // 2. Rep clicks "Open KurvAgent" -> opens in a real new tab (not embedded),
   //    which avoids the cross-site cookie issue entirely. Using a named
   //    target means clicking it again reuses the same tab instead of
-  //    spawning a new one each time.
-  openBtn.addEventListener("click", function () {
-    window.open(KURVAGENT_URL, KURVAGENT_TAB_NAME);
-    continueBtn.disabled = false;
-    setStatus("Log in and set up this merchant in the KurvAgent tab, then come back here and click Continue.");
-  });
-
-  // 3. Rep confirms the application was actually opened/started ->
-  //    advance the blueprint into "Application Started".
+  //    spawning a new one each time. Immediately after opening, advance the
+  //    blueprint into "Application Started" — there's no separate
+  //    confirmation step anymore.
   //    NOTE: verify ZOHO.CRM.BLUEPRINT.proceed() against the current
   //    Zoho widget SDK reference (zohocrm.dev) before relying on this in
   //    production — confirmed to exist per Zoho's Kaizen #95 writeup, but
   //    the exact call signature should be double-checked in sandbox.
-  continueBtn.addEventListener("click", function () {
-    continueBtn.disabled = true;
-    setStatus("Advancing to Application Started...");
+  openBtn.addEventListener("click", function () {
+    openBtn.disabled = true;
+    window.open(KURVAGENT_URL, KURVAGENT_TAB_NAME);
+    setStatus("Opened KurvAgent. Advancing to Application Started...");
     ZOHO.CRM.BLUEPRINT.proceed()
       .then(function () {
         // Close the widget AND refresh the Lead record page, so the rep
@@ -188,16 +169,10 @@
         }
       })
       .catch(function (err) {
-        continueBtn.disabled = false;
+        openBtn.disabled = false;
         setStatus("Could not advance the blueprint — try again.", true);
         console.error("BLUEPRINT.proceed failed:", err);
       });
-  });
-
-  cancelBtn.addEventListener("click", function () {
-    if (ZOHO.CRM.UI && ZOHO.CRM.UI.Popup && ZOHO.CRM.UI.Popup.close) {
-      ZOHO.CRM.UI.Popup.close();
-    }
   });
 
   ZOHO.embeddedApp.init();

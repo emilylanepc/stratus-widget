@@ -44,14 +44,6 @@
     max-width: 360px;
     margin: 0;
   }
-  #actionBar {
-    flex: 0 0 auto;
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    padding: 10px 14px;
-    border-top: 1px solid #e5e7eb;
-  }
   button {
     font-size: 14px;
     padding: 8px 16px;
@@ -60,24 +52,19 @@
     background: #fff;
     cursor: pointer;
   }
-  button.primary {
-    background: #2563eb;
-    border-color: #2563eb;
-    color: #fff;
-  }
-  button.primary:disabled {
-    background: #93c5fd;
-    border-color: #93c5fd;
-    cursor: not-allowed;
-  }
   button:hover:not(:disabled) {
     filter: brightness(0.97);
+  }
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
   }
   #openBtn {
     font-size: 16px;
     padding: 12px 24px;
     background: #22a276;
     border-color: #22a276;
+    color: #fff;
   }
   #openBtn:disabled {
     background: #8fd0b8;
@@ -90,11 +77,7 @@
   <div id="statusBar">Loading...</div>
   <div id="main">
     <p>This opens KurvAgent in a new tab so you can log in and set up the merchant (pricing, equipment, etc.).</p>
-    <button id="openBtn" class="primary">Open KurvAgent</button>
-  </div>
-  <div id="actionBar">
-    <button id="cancelBtn">Cancel</button>
-    <button id="continueBtn" class="primary" disabled>I've started the application &mdash; Continue</button>
+    <button id="openBtn">Open KurvAgent</button>
   </div>
 </div>
 
@@ -117,13 +100,17 @@
   //
   // Application_URL is not written by this widget — that's still meant to
   // come back automatically via a future KurvAgent-side webhook (see plan doc).
+  //
+  // 2026-09-21: merged the old two-step "Open KurvAgent" -> "Continue" flow
+  // into a single click. Opening the tab and advancing the blueprint now
+  // happen together on openBtn — there is no longer a separate confirmation
+  // step, so the blueprint advances the moment a rep clicks Open KurvAgent,
+  // not after they confirm they actually did something in that tab.
   var KURVAGENT_URL = "https://agent.kurvpay.com/";
   var KURVAGENT_TAB_NAME = "kurvAgentApplicationTab"; // reuse the same tab on repeat clicks
 
   var statusBar = document.getElementById("statusBar");
   var openBtn = document.getElementById("openBtn");
-  var continueBtn = document.getElementById("continueBtn");
-  var cancelBtn = document.getElementById("cancelBtn");
 
   var currentModule = null;
   var currentRecordId = null;
@@ -160,21 +147,16 @@
   // 2. Rep clicks "Open KurvAgent" -> opens in a real new tab (not embedded),
   //    which avoids the cross-site cookie issue entirely. Using a named
   //    target means clicking it again reuses the same tab instead of
-  //    spawning a new one each time.
-  openBtn.addEventListener("click", function () {
-    window.open(KURVAGENT_URL, KURVAGENT_TAB_NAME);
-    continueBtn.disabled = false;
-    setStatus("Log in and set up this merchant in the KurvAgent tab, then come back here and click Continue.");
-  });
-
-  // 3. Rep confirms the application was actually opened/started ->
-  //    advance the blueprint into "Application Started".
+  //    spawning a new one each time. Immediately after opening, advance the
+  //    blueprint — see the 2026-09-21 note above on what that tradeoff means.
   //    NOTE: verify ZOHO.CRM.BLUEPRINT.proceed() against the current
   //    Zoho widget SDK reference (zohocrm.dev) before relying on this in
   //    production — confirmed to exist per Zoho's Kaizen #95 writeup, but
   //    the exact call signature should be double-checked in sandbox.
-  continueBtn.addEventListener("click", function () {
-    continueBtn.disabled = true;
+  openBtn.addEventListener("click", function () {
+    window.open(KURVAGENT_URL, KURVAGENT_TAB_NAME);
+
+    openBtn.disabled = true;
     setStatus("Advancing to Application Started...");
     ZOHO.CRM.BLUEPRINT.proceed()
       .then(function () {
@@ -188,16 +170,10 @@
         }
       })
       .catch(function (err) {
-        continueBtn.disabled = false;
-        setStatus("Could not advance the blueprint — try again.", true);
+        openBtn.disabled = false;
+        setStatus("Opened KurvAgent, but could not advance the blueprint — click Open KurvAgent again to retry.", true);
         console.error("BLUEPRINT.proceed failed:", err);
       });
-  });
-
-  cancelBtn.addEventListener("click", function () {
-    if (ZOHO.CRM.UI && ZOHO.CRM.UI.Popup && ZOHO.CRM.UI.Popup.close) {
-      ZOHO.CRM.UI.Popup.close();
-    }
   });
 
   ZOHO.embeddedApp.init();

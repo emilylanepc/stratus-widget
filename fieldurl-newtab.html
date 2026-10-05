@@ -134,29 +134,16 @@
   </div>
 </div>
 
-<!--
-  Zoho CRM Widget JS SDK.
-  NOTE: verify this script src / version against your org's current Developer
-  Space widget template (matches the version used in the other KurvAgent
-  widgets in this repo).
--->
 <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
 
 <script>
 (function () {
-  // Opens the Lead's own Application_URL field value in a new tab (not a
-  // static KurvAgent link, not an iframe). Use this on records where the
-  // application already exists in KurvAgent and has a real, unique
-  // Application_URL saved on the Lead.
-  //
-  // Before anything opens, the widget checks REQUIRED_FIELDS. If any are
-  // empty, the rep must fill them in here; they're saved to the Lead before
-  // the blueprint transition is allowed to proceed (so the After action /
-  // SendLeadToStratus2 sees the completed record).
-  //
-  // If the Lead has no Application_URL yet, the button becomes
-  // "Create & Open Application": it calls the standalone Deluge function
-  // below (which runs SendLeadToStratus2), then opens the URL it returns.
+  // 1. Checks REQUIRED_FIELDS; if any are empty the rep fills them in here
+  //    and they're saved to the Lead.
+  // 2. If the Lead has no real Application_URL yet, "Create & Open Application"
+  //    calls the standalone function SendLeadToStratusFromWidget, which creates
+  //    the app in Stratus and returns the URL, then opens it.
+  // 3. Advances the blueprint.
   var APPLICATION_URL_FIELD = "Application_URL";
   var FALLBACK_URL = "https://agent.kurvpay.com/"; // used only if creating the app fails
 
@@ -195,10 +182,7 @@
   }
 
   if (typeof ZOHO === "undefined") {
-    setStatus(
-      "This page must be opened inside a Zoho CRM widget, not previewed standalone.",
-      true
-    );
+    setStatus("This page must be opened inside a Zoho CRM widget, not previewed standalone.", true);
     mainText.textContent = "Zoho SDK not detected.";
     return;
   }
@@ -324,7 +308,11 @@
   // ---------- Open button ----------
   function showOpenButton(record) {
     applicationUrl = record[APPLICATION_URL_FIELD];
-    needsCreate = isBlank(applicationUrl);
+    var editSlug = record.EditSlug;
+    // Only trust Application_URL if it contains this Lead's EditSlug.
+    // Leads.UponCreation can leave a placeholder URL before the app exists.
+    needsCreate = isBlank(editSlug) || isBlank(applicationUrl) ||
+                  String(applicationUrl).indexOf(String(editSlug)) === -1;
     openBtn.disabled = false;
 
     if (needsCreate) {
@@ -348,10 +336,57 @@
     loadRecord();
   });
 
+  // Calls the standalone Deluge function; resolves with the new Application_URL.
+  function createApplication() {
+    return ZOHO.CRM.FUNCTIONS.execute(CREATE_APP_FUNCTION, {
+      arguments: JSON.stringify({ leadId: String(currentRecordId) })
+    }).then(function (resp) {
+      var output = resp && resp.details && resp.details.output;
+      var result = typeof output === "string" ? JSON.parse(output) : output;
+      if (!result || !result.success || isBlank(result.application_url)) {
+        throw new Error((result && result.message) || "No application URL returned.");
+      }
+      return result.application_url;
+    });
+  }
+
   openBtn.addEventListener("click", function () {
-    if (!applicationUrl) return;
     openBtn.disabled = true;
-    window.open(applicationUrl, "_blank");
+
+    if (!needsCreate) {
+      if (!applicationUrl) return;
+      window.open(applicationUrl, "_blank");
+      advanceBlueprint();
+      return;
+    }
+
+    // Open the tab now (inside the click) so the browser doesn't block it,
+    // then point it at the real URL once Stratus returns one.
+    var tab = window.open("", "_blank");
+    if (tab) {
+      tab.document.write("<p style='font-family:sans-serif;padding:24px'>Creating application in KurvAgent...</p>");
+    }
+    setStatus("Creating application in KurvAgent...");
+
+    createApplication()
+      .then(function (url) {
+        applicationUrl = url;
+        if (tab && !tab.closed) tab.location.href = url;
+        else window.open(url, "_blank");
+        advanceBlueprint();
+      })
+      .catch(function (err) {
+        console.error("Create application failed:", err);
+        if (tab && !tab.closed) tab.close();
+        openBtn.disabled = false;
+        setStatus("Could not create the application: " + (err && err.message ? err.message : "unknown error") + ". Try again, or open KurvAgent manually.", true);
+        needsCreate = false;
+        applicationUrl = FALLBACK_URL;
+        openBtn.textContent = "Open KurvAgent Instead";
+      });
+  });
+
+  function advanceBlueprint() {
     setStatus("Opened in a new tab. Advancing to Application Started...");
     ZOHO.CRM.BLUEPRINT.proceed()
       .then(function () {
@@ -366,7 +401,7 @@
         setStatus("Could not advance the blueprint — try again.", true);
         console.error("BLUEPRINT.proceed failed:", err);
       });
-  });
+  }
 
   ZOHO.embeddedApp.init();
 })();

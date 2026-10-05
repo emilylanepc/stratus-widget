@@ -134,31 +134,17 @@
   </div>
 </div>
 
-<!--
-  Zoho CRM Widget JS SDK.
-  NOTE: verify this script src / version against your org's current Developer
-  Space widget template (matches the version used in the other KurvAgent
-  widgets in this repo).
--->
 <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
 
 <script>
 (function () {
-  // Opens the Lead's own Application_URL field value in a new tab (not a
-  // static KurvAgent link, not an iframe). Use this on records where the
-  // application already exists in KurvAgent and has a real, unique
-  // Application_URL saved on the Lead.
-  //
-  // Before anything opens, the widget checks REQUIRED_FIELDS. If any are
-  // empty, the rep must fill them in here; they're saved to the Lead before
-  // the blueprint transition is allowed to proceed (so the After action /
-  // SendLeadToStratus2 sees the completed record).
-  //
-  // If the Lead has no Application_URL yet, the button becomes
-  // "Create & Open Application": it calls the standalone Deluge function
-  // SendLeadToStratusFromWidget, then opens the URL it returns. After the
-  // missing-fields save, it first waits up to 20s for the Lead workflow to
-  // generate the app, so it doesn't create a duplicate.
+  // 1. Checks REQUIRED_FIELDS; if any are empty the rep fills them in here
+  //    and they're saved to the Lead (fires Lead workflows).
+  // 2. After saving, waits up to 20s for the workflow to generate the app.
+  // 3. If there's still no real Application_URL, shows "Create & Open
+  //    Application" (calls SendLeadToStratusFromWidget) while checking in the
+  //    background for 30s and switching to "Open Application" if it appears.
+  // 4. Opens the app in a new tab and advances the blueprint.
   var APPLICATION_URL_FIELD = "Application_URL";
   var FALLBACK_URL = "https://agent.kurvpay.com/"; // used only if creating the app fails
 
@@ -367,6 +353,43 @@
     return poll();
   }
 
+  // While "Create & Open Application" is showing, keep checking quietly in the
+  // background. If a workflow (e.g. on Lead create) finishes generating the app
+  // in the meantime, swap the button to "Open Application" so the rep doesn't
+  // need to refresh. Stops once the rep clicks or after BG_WATCH_MS.
+  var BG_WATCH_MS = 30000;
+  var watching = false;
+
+  function watchForApplication() {
+    if (watching) return;
+    watching = true;
+    var started = Date.now();
+
+    function tick() {
+      if (!needsCreate || openBtn.disabled || Date.now() - started >= BG_WATCH_MS) {
+        watching = false;
+        return;
+      }
+      ZOHO.CRM.API.getRecord({ Entity: currentModule, RecordID: currentRecordId })
+        .then(function (response) {
+          var record = response.data[0];
+          // Re-check: the rep may have clicked while this request was in flight.
+          if (hasRealAppUrl(record) && needsCreate && !openBtn.disabled) {
+            watching = false;
+            showOpenButton(record);
+            return;
+          }
+          setTimeout(tick, POLL_INTERVAL_MS);
+        })
+        .catch(function (err) {
+          console.error("background getRecord failed:", err);
+          setTimeout(tick, POLL_INTERVAL_MS);
+        });
+    }
+
+    setTimeout(tick, POLL_INTERVAL_MS);
+  }
+
   // ---------- Open button ----------
   function showOpenButton(record) {
     applicationUrl = record[APPLICATION_URL_FIELD];
@@ -378,6 +401,7 @@
       mainText.textContent = "This Lead doesn't have an application yet. Click below to create it in KurvAgent and open it in a new tab.";
       openBtn.textContent = "Create & Open Application";
       openBtn.style.display = "inline-block";
+      watchForApplication();
       return;
     }
 

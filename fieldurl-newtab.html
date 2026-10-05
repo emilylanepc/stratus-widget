@@ -75,6 +75,46 @@
     background: #8fd0b8;
     border-color: #8fd0b8;
   }
+
+  /* ---- Missing-fields form ---- */
+  #missingForm {
+    display: none;
+    width: 100%;
+    max-width: 340px;
+    text-align: left;
+  }
+  #missingForm .field {
+    margin-bottom: 12px;
+  }
+  #missingForm label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: #374151;
+  }
+  #missingForm input {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 14px;
+    padding: 8px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+  }
+  #missingForm input.invalid {
+    border-color: #dc2626;
+    background: #fef2f2;
+  }
+  #missingForm .fieldError {
+    font-size: 12px;
+    color: #b91c1c;
+    margin-top: 3px;
+    min-height: 14px;
+  }
+  #missingForm .actions {
+    text-align: center;
+    margin-top: 8px;
+  }
 </style>
 </head>
 <body>
@@ -82,6 +122,14 @@
   <div id="statusBar">Loading...</div>
   <div id="main">
     <p id="mainText">Looking up this Lead's application link...</p>
+
+    <form id="missingForm" novalidate>
+      <div id="missingFields"></div>
+      <div class="actions">
+        <button type="submit" id="saveBtn" class="primary">Save &amp; Continue</button>
+      </div>
+    </form>
+
     <button id="openBtn" class="primary" style="display:none">Open Application</button>
   </div>
 </div>
@@ -100,20 +148,42 @@
   // static KurvAgent link, not an iframe). Use this on records where the
   // application already exists in KurvAgent and has a real, unique
   // Application_URL saved on the Lead.
+  //
+  // Before anything opens, the widget checks REQUIRED_FIELDS. If any are
+  // empty, the rep must fill them in here; they're saved to the Lead before
+  // the blueprint transition is allowed to proceed (so the After action /
+  // SendLeadToStratus2 sees the completed record).
   var APPLICATION_URL_FIELD = "Application_URL";
   var FALLBACK_URL = "https://agent.kurvpay.com/"; // used when Application_URL is empty
+
+  // API name -> label. Add "Company": "Company" here to require it too.
+  var REQUIRED_FIELDS = {
+    First_Name: "First Name",
+    Email: "Email",
+    Phone: "Phone"
+  };
+
+  var INPUT_TYPES = { Email: "email", Phone: "tel" };
 
   var statusBar = document.getElementById("statusBar");
   var mainText = document.getElementById("mainText");
   var openBtn = document.getElementById("openBtn");
+  var missingForm = document.getElementById("missingForm");
+  var missingFieldsEl = document.getElementById("missingFields");
+  var saveBtn = document.getElementById("saveBtn");
 
   var currentModule = null;
   var currentRecordId = null;
   var applicationUrl = null;
+  var missingList = [];
 
   function setStatus(msg, isError) {
     statusBar.textContent = msg;
     statusBar.className = isError ? "error" : "";
+  }
+
+  function isBlank(v) {
+    return v === null || v === undefined || String(v).trim() === "";
   }
 
   if (typeof ZOHO === "undefined") {
@@ -125,37 +195,150 @@
     return;
   }
 
-  ZOHO.embeddedApp.on("PageLoad", function (data) {
-    currentModule = data.Entity;
-    currentRecordId = data.EntityId;
-
-    setStatus("Loading application link from " + APPLICATION_URL_FIELD + "...");
-
-    ZOHO.CRM.API.getRecord({ Entity: currentModule, RecordID: currentRecordId })
+  // ---------- Load record ----------
+  function loadRecord() {
+    setStatus("Loading Lead details...");
+    return ZOHO.CRM.API.getRecord({ Entity: currentModule, RecordID: currentRecordId })
       .then(function (response) {
         var record = response.data[0];
-        applicationUrl = record[APPLICATION_URL_FIELD];
 
-        if (!applicationUrl) {
-          // No Application_URL yet — fall back to opening KurvAgent directly
-          // so the rep can still log in and create the application manually.
-          applicationUrl = FALLBACK_URL;
-          setStatus("No " + APPLICATION_URL_FIELD + " found yet — opening KurvAgent instead.");
-          mainText.textContent = "This Lead doesn't have an application link yet. Click below to open KurvAgent and set it up manually.";
-          openBtn.textContent = "Open KurvAgent";
-          openBtn.style.display = "inline-block";
+        missingList = Object.keys(REQUIRED_FIELDS).filter(function (f) {
+          return isBlank(record[f]);
+        });
+
+        if (missingList.length > 0) {
+          showMissingForm(missingList);
           return;
         }
 
-        setStatus("Ready.");
-        mainText.textContent = "Click below to open this Lead's application in a new tab.";
-        openBtn.textContent = "Open Application";
-        openBtn.style.display = "inline-block";
+        showOpenButton(record);
       })
       .catch(function (err) {
         setStatus("Could not load the record from Zoho.", true);
         console.error("getRecord failed:", err);
       });
+  }
+
+  // ---------- Missing-fields form ----------
+  function showMissingForm(fields) {
+    openBtn.style.display = "none";
+    missingFieldsEl.innerHTML = "";
+
+    fields.forEach(function (apiName) {
+      var wrap = document.createElement("div");
+      wrap.className = "field";
+
+      var label = document.createElement("label");
+      label.setAttribute("for", "f_" + apiName);
+      label.textContent = REQUIRED_FIELDS[apiName];
+
+      var input = document.createElement("input");
+      input.id = "f_" + apiName;
+      input.name = apiName;
+      input.type = INPUT_TYPES[apiName] || "text";
+      input.autocomplete = "off";
+
+      var err = document.createElement("div");
+      err.className = "fieldError";
+      err.id = "e_" + apiName;
+
+      wrap.appendChild(label);
+      wrap.appendChild(input);
+      wrap.appendChild(err);
+      missingFieldsEl.appendChild(wrap);
+    });
+
+    var labels = fields.map(function (f) { return REQUIRED_FIELDS[f]; }).join(", ");
+    setStatus("Missing required info: " + labels, true);
+    mainText.textContent = "Fill in the missing info before sending or starting the application.";
+    missingForm.style.display = "block";
+
+    var first = missingFieldsEl.querySelector("input");
+    if (first) first.focus();
+  }
+
+  function validate(apiName, value) {
+    if (isBlank(value)) return REQUIRED_FIELDS[apiName] + " is required.";
+    if (apiName === "Email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      return "Enter a valid email address.";
+    }
+    if (apiName === "Phone" && value.replace(/[^0-9]/g, "").length < 10) {
+      return "Phone must have at least 10 digits.";
+    }
+    return null;
+  }
+
+  missingForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+
+    var updates = { id: currentRecordId };
+    var hasError = false;
+
+    missingList.forEach(function (apiName) {
+      var input = document.getElementById("f_" + apiName);
+      var errEl = document.getElementById("e_" + apiName);
+      var value = input.value.trim();
+      var msg = validate(apiName, value);
+
+      errEl.textContent = msg || "";
+      input.classList.toggle("invalid", !!msg);
+      if (msg) hasError = true;
+      else updates[apiName] = value;
+    });
+
+    if (hasError) return;
+
+    saveBtn.disabled = true;
+    setStatus("Saving...");
+
+    ZOHO.CRM.API.updateRecord({
+      Entity: currentModule,
+      APIData: updates,
+      Trigger: []
+    })
+      .then(function (resp) {
+        var result = resp && resp.data && resp.data[0];
+        if (!result || result.code !== "SUCCESS") {
+          throw result || resp;
+        }
+        missingForm.style.display = "none";
+        saveBtn.disabled = false;
+        return loadRecord(); // re-check, then show Open button
+      })
+      .catch(function (err) {
+        saveBtn.disabled = false;
+        var detail = err && err.message ? " (" + err.message + ")" : "";
+        setStatus("Could not save the Lead" + detail + ". Try again.", true);
+        console.error("updateRecord failed:", err);
+      });
+  });
+
+  // ---------- Open button ----------
+  function showOpenButton(record) {
+    applicationUrl = record[APPLICATION_URL_FIELD];
+
+    if (!applicationUrl) {
+      // No Application_URL yet — fall back to opening KurvAgent directly
+      // so the rep can still log in and create the application manually.
+      applicationUrl = FALLBACK_URL;
+      setStatus("No " + APPLICATION_URL_FIELD + " found yet — opening KurvAgent instead.");
+      mainText.textContent = "This Lead doesn't have an application link yet. Click below to open KurvAgent and set it up manually.";
+      openBtn.textContent = "Open KurvAgent";
+      openBtn.style.display = "inline-block";
+      return;
+    }
+
+    setStatus("Ready.");
+    mainText.textContent = "Click below to open this Lead's application in a new tab.";
+    openBtn.textContent = "Open Application";
+    openBtn.style.display = "inline-block";
+  }
+
+  ZOHO.embeddedApp.on("PageLoad", function (data) {
+    currentModule = data.Entity;
+    // EntityId can arrive as an array in some widget contexts
+    currentRecordId = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
+    loadRecord();
   });
 
   openBtn.addEventListener("click", function () {

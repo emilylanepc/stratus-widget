@@ -153,8 +153,15 @@
   // empty, the rep must fill them in here; they're saved to the Lead before
   // the blueprint transition is allowed to proceed (so the After action /
   // SendLeadToStratus2 sees the completed record).
+  //
+  // If the Lead has no Application_URL yet, the button becomes
+  // "Create & Open Application": it calls the standalone Deluge function
+  // below (which runs SendLeadToStratus2), then opens the URL it returns.
   var APPLICATION_URL_FIELD = "Application_URL";
-  var FALLBACK_URL = "https://agent.kurvpay.com/"; // used when Application_URL is empty
+  var FALLBACK_URL = "https://agent.kurvpay.com/"; // used only if creating the app fails
+
+  // API name of the standalone function (Setup > Developer Hub > Functions).
+  var CREATE_APP_FUNCTION = "sendleadtostratusfromwidget";
 
   // API name -> label. Add "Company": "Company" here to require it too.
   var REQUIRED_FIELDS = {
@@ -175,6 +182,7 @@
   var currentModule = null;
   var currentRecordId = null;
   var applicationUrl = null;
+  var needsCreate = false;
   var missingList = [];
 
   function setStatus(msg, isError) {
@@ -294,7 +302,7 @@
     ZOHO.CRM.API.updateRecord({
       Entity: currentModule,
       APIData: updates,
-      Trigger: []
+      Trigger: ["workflow"]
     })
       .then(function (resp) {
         var result = resp && resp.data && resp.data[0];
@@ -316,14 +324,13 @@
   // ---------- Open button ----------
   function showOpenButton(record) {
     applicationUrl = record[APPLICATION_URL_FIELD];
+    needsCreate = isBlank(applicationUrl);
+    openBtn.disabled = false;
 
-    if (!applicationUrl) {
-      // No Application_URL yet — fall back to opening KurvAgent directly
-      // so the rep can still log in and create the application manually.
-      applicationUrl = FALLBACK_URL;
-      setStatus("No " + APPLICATION_URL_FIELD + " found yet — opening KurvAgent instead.");
-      mainText.textContent = "This Lead doesn't have an application link yet. Click below to open KurvAgent and set it up manually.";
-      openBtn.textContent = "Open KurvAgent";
+    if (needsCreate) {
+      setStatus("Ready.");
+      mainText.textContent = "This Lead doesn't have an application yet. Click below to create it in KurvAgent and open it in a new tab.";
+      openBtn.textContent = "Create & Open Application";
       openBtn.style.display = "inline-block";
       return;
     }

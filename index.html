@@ -11,117 +11,74 @@
     height: 100%;
     font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
     background: #ffffff;
-    color: #1f2937;
-  }
-  #wrap {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-  }
-  #statusBar {
-    padding: 10px 14px;
-    font-size: 13px;
-    border-bottom: 1px solid #e5e7eb;
-    color: #4b5563;
-    flex: 0 0 auto;
-  }
-  #statusBar.error {
-    color: #b91c1c;
-    background: #fef2f2;
   }
   #main {
-    flex: 1 1 auto;
+    height: 100vh;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 16px;
+    gap: 12px;
     padding: 24px;
-    text-align: center;
-  }
-  #main p {
-    color: #6b7280;
-    font-size: 14px;
-    max-width: 360px;
-    margin: 0;
-  }
-  button {
-    font-size: 14px;
-    padding: 8px 16px;
-    border-radius: 6px;
-    border: 1px solid #d1d5db;
-    background: #fff;
-    cursor: pointer;
-  }
-  button.primary {
-    background: #2563eb;
-    border-color: #2563eb;
-    color: #fff;
-  }
-  button.primary:disabled {
-    background: #93c5fd;
-    border-color: #93c5fd;
-    cursor: not-allowed;
-  }
-  button:hover:not(:disabled) {
-    filter: brightness(0.97);
+    box-sizing: border-box;
   }
   #openBtn {
     font-size: 16px;
     padding: 12px 24px;
+    border-radius: 6px;
+    border: 1px solid #22a276;
     background: #22a276;
-    border-color: #22a276;
+    color: #fff;
+    cursor: pointer;
   }
   #openBtn:disabled {
     background: #8fd0b8;
     border-color: #8fd0b8;
+    cursor: not-allowed;
+  }
+  /* Hidden unless something goes wrong */
+  #errorMsg {
+    display: none;
+    color: #b91c1c;
+    font-size: 13px;
+    text-align: center;
+    max-width: 320px;
   }
 </style>
 </head>
 <body>
-<div id="wrap">
-  <div id="statusBar">Loading...</div>
-  <div id="main">
-    <p id="hint">This opens KurvAgent in a new tab so you can log in and set up the merchant.</p>
-    <button id="openBtn" class="primary">Open KurvAgent</button>
-  </div>
+<div id="main">
+  <button id="openBtn">Open KurvAgent</button>
+  <div id="errorMsg"></div>
 </div>
 
 <script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
 
 <script>
 (function () {
-  // Opens KurvAgent in a real tab/browser (never an iframe: KurvAgent's login
-  // cookie is blocked in third-party iframes -> CSRF Token Mismatch).
+  // Opens KurvAgent outside of any iframe (its login cookie is blocked in
+  // third-party iframes -> CSRF Token Mismatch).
   var KURVAGENT_URL = "https://agent.kurvpay.com/";
   var KURVAGENT_TAB_NAME = "kurvAgentApplicationTab";
   var IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-  var statusBar = document.getElementById("statusBar");
   var openBtn = document.getElementById("openBtn");
-  var hint = document.getElementById("hint");
+  var errorMsg = document.getElementById("errorMsg");
 
-  function setStatus(msg, isError) {
-    statusBar.textContent = msg;
-    statusBar.className = isError ? "error" : "";
+  function showError(msg) {
+    errorMsg.textContent = msg;
+    errorMsg.style.display = "block";
   }
 
   if (typeof ZOHO === "undefined") {
-    setStatus("The Zoho SDK did not load. Open this from the button in Zoho CRM.", true);
+    openBtn.disabled = true;
+    showError("The Zoho SDK did not load. Open this from the button in Zoho CRM.");
     return;
   }
 
-  if (IS_MOBILE) {
-    hint.textContent = "Tap below, then choose the in-app browser when asked. Tap back here when you're done.";
-  }
-
-  ZOHO.embeddedApp.on("PageLoad", function () {
-    setStatus("Ready. Tap \"Open KurvAgent\" to log in and set up this merchant.");
-  });
-
-  // Advances the blueprint only when this widget is running inside a
-  // blueprint transition. On a plain button there's no transition, so the
-  // call rejects; we treat that as "nothing to advance" instead of an error.
+  // Advances the blueprint only if this widget is inside a blueprint
+  // transition. On a plain button the call rejects, which we treat as
+  // "nothing to advance" rather than an error.
   function tryAdvanceBlueprint() {
     if (!ZOHO.CRM.BLUEPRINT || !ZOHO.CRM.BLUEPRINT.proceed) {
       return Promise.resolve(false);
@@ -129,7 +86,7 @@
     return ZOHO.CRM.BLUEPRINT.proceed()
       .then(function () { return true; })
       .catch(function (err) {
-        console.warn("No blueprint to advance (plain button context?):", err);
+        console.warn("No blueprint to advance:", err);
         return false;
       });
   }
@@ -137,24 +94,20 @@
   openBtn.addEventListener("click", function () {
     openBtn.disabled = true;
 
-    // Open first, synchronously inside the tap, so it's never blocked.
-    window.open(KURVAGENT_URL, KURVAGENT_TAB_NAME);
-
     if (IS_MOBILE) {
-      // Mobile: do NOT close or reload the widget. Closing it while the Zoho
-      // app's "Open links using" sheet is up kills the sheet and leaves the
-      // rep stuck. Just leave the widget open; they tap back when done.
-      setStatus("Opening KurvAgent...");
+      // Mobile: don't open a new window. The Zoho app's in-app browser was
+      // receiving a blank page instead of the URL. Load KurvAgent right here
+      // in the widget's own screen instead; the top-left back arrow returns
+      // to the Lead.
       tryAdvanceBlueprint().then(function () {
-        setStatus("KurvAgent opened. Tap back to return to the Lead.");
-        openBtn.disabled = false;
-        openBtn.textContent = "Open KurvAgent again";
+        window.location.href = KURVAGENT_URL;
       });
       return;
     }
 
-    // Desktop: tab is already open, so it's safe to close the popup.
-    setStatus("Opened KurvAgent.");
+    // Desktop: open the tab synchronously inside the click so it isn't
+    // blocked, then close the popup.
+    window.open(KURVAGENT_URL, KURVAGENT_TAB_NAME);
     tryAdvanceBlueprint().then(function (advanced) {
       if (advanced && ZOHO.CRM.UI.Popup && ZOHO.CRM.UI.Popup.closeReload) {
         ZOHO.CRM.UI.Popup.closeReload();

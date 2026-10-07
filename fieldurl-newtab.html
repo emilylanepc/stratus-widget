@@ -144,9 +144,16 @@
   // 3. If there's still no real Application_URL, shows "Create & Open
   //    Application" (calls SendLeadToStratusFromWidget) while checking in the
   //    background for 30s and switching to "Open Application" if it appears.
-  // 4. Opens the app in a new tab and advances the blueprint.
+  // 4. Desktop: opens the app in a new tab and advances the blueprint.
+  //    Mobile: advances the blueprint FIRST, then loads the app in place
+  //    (no new tab, no closeReload) so the Zoho app's "Open links using"
+  //    sheet never appears and can't get torn down mid-prompt.
   var APPLICATION_URL_FIELD = "Application_URL";
   var FALLBACK_URL = "https://agent.kurvpay.com/"; // used only if creating the app fails
+
+  // True inside the Zoho CRM mobile app (and mobile browsers).
+  var IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  var OPEN_WHERE = IS_MOBILE ? "" : " in a new tab";
 
   // API name of the standalone function (Setup > Developer Hub > Functions).
   var CREATE_APP_FUNCTION = "sendleadtostratusfromwidget";
@@ -398,7 +405,7 @@
 
     if (needsCreate) {
       setStatus("Ready.");
-      mainText.textContent = "This Lead doesn't have an application yet. Click below to create it in KurvAgent and open it in a new tab.";
+      mainText.textContent = "This Lead doesn't have an application yet. Click below to create it in KurvAgent and open it" + OPEN_WHERE + ".";
       openBtn.textContent = "Create & Open Application";
       openBtn.style.display = "inline-block";
       watchForApplication();
@@ -406,7 +413,7 @@
     }
 
     setStatus("Ready.");
-    mainText.textContent = "Click below to open this Lead's application in a new tab.";
+    mainText.textContent = "Click below to open this Lead's application" + OPEN_WHERE + ".";
     openBtn.textContent = "Open Application";
     openBtn.style.display = "inline-block";
   }
@@ -435,6 +442,12 @@
   openBtn.addEventListener("click", function () {
     openBtn.disabled = true;
 
+    if (IS_MOBILE) {
+      openOnMobile();
+      return;
+    }
+
+    // ---------- Desktop (unchanged) ----------
     if (!needsCreate) {
       if (!applicationUrl) return;
       window.open(applicationUrl, "_blank");
@@ -458,16 +471,58 @@
         advanceBlueprint();
       })
       .catch(function (err) {
-        console.error("Create application failed:", err);
         if (tab && !tab.closed) tab.close();
-        openBtn.disabled = false;
-        setStatus("Could not create the application: " + (err && err.message ? err.message : "unknown error") + ". Try again, or open KurvAgent manually.", true);
-        needsCreate = false;
-        applicationUrl = FALLBACK_URL;
-        openBtn.textContent = "Open KurvAgent Instead";
+        handleCreateFailure(err);
       });
   });
 
+  // ---------- Mobile ----------
+  // No new tab (that's what triggers the Zoho app's "Open links using" sheet),
+  // and no closeReload (that's what kills the sheet and leaves the rep stuck).
+  // Order: get URL -> advance blueprint -> load the app in place.
+  function openOnMobile() {
+    var getUrl;
+    if (needsCreate) {
+      setStatus("Creating application in KurvAgent...");
+      getUrl = createApplication().catch(function (err) {
+        handleCreateFailure(err);
+        return null;
+      });
+    } else {
+      if (!applicationUrl) { openBtn.disabled = false; return; }
+      getUrl = Promise.resolve(applicationUrl);
+    }
+
+    getUrl.then(function (url) {
+      if (!url) return; // create failed; handleCreateFailure already reset the UI
+      applicationUrl = url;
+      needsCreate = false; // a retry should reuse this URL, not create another app
+
+      setStatus("Advancing to Application Started...");
+      ZOHO.CRM.BLUEPRINT.proceed()
+        .then(function () {
+          setStatus("Opening application...");
+          window.location.href = url;
+        })
+        .catch(function (err) {
+          console.error("BLUEPRINT.proceed failed:", err);
+          openBtn.disabled = false;
+          openBtn.textContent = "Open Application";
+          setStatus("Could not advance the blueprint. Tap Open Application to try again.", true);
+        });
+    });
+  }
+
+  function handleCreateFailure(err) {
+    console.error("Create application failed:", err);
+    openBtn.disabled = false;
+    setStatus("Could not create the application: " + (err && err.message ? err.message : "unknown error") + ". Try again, or open KurvAgent manually.", true);
+    needsCreate = false;
+    applicationUrl = FALLBACK_URL;
+    openBtn.textContent = "Open KurvAgent Instead";
+  }
+
+  // Desktop only: the tab is already open, so closing/reloading the widget is safe.
   function advanceBlueprint() {
     setStatus("Opened in a new tab. Advancing to Application Started...");
     ZOHO.CRM.BLUEPRINT.proceed()

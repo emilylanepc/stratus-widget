@@ -155,7 +155,7 @@
   var IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   var OPEN_WHERE = IS_MOBILE ? "" : " in a new tab";
   // Shown in the status bar so you can confirm which build/branch is running.
-  var BUILD_TAG = " (v2 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
+  var BUILD_TAG = " (v3 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
 
   // API name of the standalone function (Setup > Developer Hub > Functions).
   var CREATE_APP_FUNCTION = "sendleadtostratusfromwidget";
@@ -479,40 +479,55 @@
   });
 
   // ---------- Mobile ----------
-  // No new tab (that's what triggers the Zoho app's "Open links using" sheet),
-  // and no closeReload (that's what kills the sheet and leaves the rep stuck).
-  // Order: get URL -> advance blueprint -> load the app in place.
+  // BLUEPRINT.proceed() closes the widget on mobile, so nothing can run after it.
+  // Two taps instead:
+  //   Tap 1 "Open Application": opens the app. Nothing closes the widget, so the
+  //          Zoho app's "Open links using" sheet stays up (choose In-app browser).
+  //   Tap 2 "Mark Application Started": when the rep comes back, advances the
+  //          blueprint and closes the widget.
+  // If the app still has to be created, tap 1 creates it first and the button
+  // flips to "Open Application", so the open always happens directly in a tap.
+  var mobileStep = "open"; // "open" -> "finish"
+
   function openOnMobile() {
-    var getUrl;
-    if (needsCreate) {
-      setStatus("Creating application in KurvAgent...");
-      getUrl = createApplication().catch(function (err) {
-        handleCreateFailure(err);
-        return null;
-      });
-    } else {
-      if (!applicationUrl) { openBtn.disabled = false; return; }
-      getUrl = Promise.resolve(applicationUrl);
-    }
-
-    getUrl.then(function (url) {
-      if (!url) return; // create failed; handleCreateFailure already reset the UI
-      applicationUrl = url;
-      needsCreate = false; // a retry should reuse this URL, not create another app
-
+    if (mobileStep === "finish") {
       setStatus("Advancing to Application Started...");
       ZOHO.CRM.BLUEPRINT.proceed()
         .then(function () {
-          setStatus("Opening application...");
-          window.location.href = url;
+          if (ZOHO.CRM.UI.Popup && ZOHO.CRM.UI.Popup.closeReload) {
+            ZOHO.CRM.UI.Popup.closeReload();
+          }
         })
         .catch(function (err) {
           console.error("BLUEPRINT.proceed failed:", err);
           openBtn.disabled = false;
-          openBtn.textContent = "Open Application";
-          setStatus("Could not advance the blueprint. Tap Open Application to try again.", true);
+          setStatus("Could not advance the blueprint. Tap Mark Application Started to try again.", true);
         });
-    });
+      return;
+    }
+
+    if (needsCreate) {
+      setStatus("Creating application in KurvAgent...");
+      createApplication()
+        .then(function (url) {
+          applicationUrl = url;
+          needsCreate = false; // never create twice
+          openBtn.textContent = "Open Application";
+          openBtn.disabled = false;
+          setStatus("Application created. Tap Open Application.");
+          mainText.textContent = "The application is ready.";
+        })
+        .catch(handleCreateFailure);
+      return;
+    }
+
+    if (!applicationUrl) { openBtn.disabled = false; return; }
+    window.open(applicationUrl, "_blank");
+    mobileStep = "finish";
+    openBtn.textContent = "Mark Application Started";
+    openBtn.disabled = false;
+    setStatus("Application opened.");
+    mainText.textContent = "If asked, choose In-app browser. When you're done and back here, tap Mark Application Started to move the Lead forward.";
   }
 
   function handleCreateFailure(err) {

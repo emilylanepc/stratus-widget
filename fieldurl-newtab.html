@@ -154,6 +154,8 @@
   // True inside the Zoho CRM mobile app (and mobile browsers).
   var IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   var OPEN_WHERE = IS_MOBILE ? "" : " in a new tab";
+  // Shown in the status bar so you can confirm which build/branch is running.
+  var BUILD_TAG = " (v2 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
 
   // API name of the standalone function (Setup > Developer Hub > Functions).
   var CREATE_APP_FUNCTION = "sendleadtostratusfromwidget";
@@ -404,7 +406,7 @@
     openBtn.disabled = false;
 
     if (needsCreate) {
-      setStatus("Ready.");
+      setStatus("Ready." + BUILD_TAG);
       mainText.textContent = "This Lead doesn't have an application yet. Click below to create it in KurvAgent and open it" + OPEN_WHERE + ".";
       openBtn.textContent = "Create & Open Application";
       openBtn.style.display = "inline-block";
@@ -412,7 +414,7 @@
       return;
     }
 
-    setStatus("Ready.");
+    setStatus("Ready." + BUILD_TAG);
     mainText.textContent = "Click below to open this Lead's application" + OPEN_WHERE + ".";
     openBtn.textContent = "Open Application";
     openBtn.style.display = "inline-block";

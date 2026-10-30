@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Create App Link</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background: #ffffff;
+    color: #1f2937;
+  }
+  #wrap { display: flex; flex-direction: column; height: 100vh; }
+  #statusBar {
+    padding: 10px 14px;
+    font-size: 13px;
+    border-bottom: 1px solid #e5e7eb;
+    color: #4b5563;
+    flex: 0 0 auto;
+  }
+  #statusBar.error { color: #b91c1c; background: #fef2f2; }
+  #statusBar.ok { color: #166534; background: #f0fdf4; }
+  #main {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 24px;
+    text-align: center;
+  }
+  #main p { color: #6b7280; font-size: 14px; max-width: 360px; margin: 0; }
+  button {
+    font-size: 14px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid #d1d5db;
+    background: #fff;
+    cursor: pointer;
+  }
+  button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+  button.primary:disabled { background: #93c5fd; border-color: #93c5fd; cursor: not-allowed; }
+  button:hover:not(:disabled) { filter: brightness(0.97); }
+  #actionBtn { font-size: 16px; padding: 12px 24px; background: #22a276; border-color: #22a276; }
+  #actionBtn:disabled { background: #8fd0b8; border-color: #8fd0b8; }
+
+  #urlBox { display: none; width: 100%; max-width: 360px; }
+  #urlBox input {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 13px;
+    padding: 8px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background: #f9fafb;
+    color: #374151;
+  }
+  #copyBtn { margin-top: 8px; }
+
+  /* ---- Missing-fields form ---- */
+  #missingForm { display: none; width: 100%; max-width: 340px; text-align: left; }
+  #missingForm .field { margin-bottom: 12px; }
+  #missingForm label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #374151; }
+  #missingForm input {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 14px;
+    padding: 8px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+  }
+  #missingForm input.invalid { border-color: #dc2626; background: #fef2f2; }
+  #missingForm .fieldError { font-size: 12px; color: #b91c1c; margin-top: 3px; min-height: 14px; }
+  #missingForm .actions { text-align: center; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="statusBar">Loading...</div>
+  <div id="main">
+    <p id="mainText">Checking this Lead...</p>
+
+    <form id="missingForm" novalidate>
+      <div id="missingFields"></div>
+      <div class="actions">
+        <button type="submit" id="saveBtn" class="primary">Save &amp; Continue</button>
+      </div>
+    </form>
+
+    <div id="urlBox">
+      <input id="urlField" type="text" readonly />
+      <button type="button" id="copyBtn">Copy link</button>
+    </div>
+
+    <button id="actionBtn" class="primary" style="display:none">Create App Link</button>
+  </div>
+</div>
+
+<script src="https://live.zwidgets.com/js-sdk/1.1/ZohoEmbededAppSDK.min.js"></script>
+
+<script>
+(function () {
+  // "Create App Link" — Blueprint widget for the Send App To Merchant transition.
+  // Same logic as fieldurl-newtab.html, but it never opens the application:
+  // 1. Checks REQUIRED_FIELDS; if any are empty the rep fills them in here and
+  //    they're saved to the Lead (fires Lead workflows).
+  // 2. After saving, waits up to 20s for the workflow to generate the app.
+  // 3. If there's still no real Application_URL, "Create App Link" calls
+  //    sendleadtostratusfromwidget and writes the URL to Application_URL
+  //    (only if the function didn't already).
+  // 4. Advances the blueprint and closes/reloads. Same on desktop and mobile,
+  //    since nothing is opened there's no "Open links using" sheet to break.
+  var APPLICATION_URL_FIELD = "Application_URL";
+  var CREATE_APP_FUNCTION = "sendleadtostratusfromwidget";
+
+  // true  = after the link is filled in, complete the transition automatically.
+  // false = show the link with a "Complete Transition" button instead.
+  var AUTO_PROCEED = true;
+
+  var IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  var BUILD_TAG = " (v1 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
+
+  // API name -> label. Keep in sync with fieldurl-newtab.html.
+  var REQUIRED_FIELDS = {
+    First_Name: "First Name",
+    Email: "Email",
+    Phone: "Phone"
+  };
+  var INPUT_TYPES = { Email: "email", Phone: "tel" };
+
+  var statusBar = document.getElementById("statusBar");
+  var mainText = document.getElementById("mainText");
+  var actionBtn = document.getElementById("actionBtn");
+  var missingForm = document.getElementById("missingForm");
+  var missingFieldsEl = document.getElementById("missingFields");
+  var saveBtn = document.getElementById("saveBtn");
+  var urlBox = document.getElementById("urlBox");
+  var urlField = document.getElementById("urlField");
+  var copyBtn = document.getElementById("copyBtn");
+
+  var currentModule = null;
+  var currentRecordId = null;
+  var missingList = [];
+  var step = "create"; // "create" -> "proceed"
+
+  function setStatus(msg, kind) {
+    statusBar.textContent = msg;
+    statusBar.className = kind || "";
+  }
+  function isBlank(v) {
+    return v === null || v === undefined || String(v).trim() === "";
+  }
+
+  if (typeof ZOHO === "undefined") {
+    setStatus("This page must be opened inside a Zoho CRM widget, not previewed standalone.", "error");
+    mainText.textContent = "Zoho SDK not detected.";
+    return;
+  }
+
+  function getRecord() {
+    return ZOHO.CRM.API.getRecord({ Entity: currentModule, RecordID: currentRecordId })
+      .then(function (r) { return r.data[0]; });
+  }
+
+  // Only trust Application_URL if it contains this Lead's EditSlug
+  // (Leads.UponCreation can leave a placeholder URL before the app exists).
+  function hasRealAppUrl(record) {
+    var url = record[APPLICATION_URL_FIELD];
+    var slug = record.EditSlug;
+    return !isBlank(slug) && !isBlank(url) && String(url).indexOf(String(slug)) !== -1;
+  }
+
+  // ---------- Load record ----------
+  function loadRecord() {
+    setStatus("Loading Lead details...");
+    return getRecord()
+      .then(function (record) {
+        missingList = Object.keys(REQUIRED_FIELDS).filter(function (f) {
+          return isBlank(record[f]);
+        });
+        if (missingList.length > 0) {
+          showMissingForm(missingList);
+          return;
+        }
+        showAction(record);
+      })
+      .catch(function (err) {
+        setStatus("Could not load the record from Zoho.", "error");
+        console.error("getRecord failed:", err);
+      });
+  }
+
+  // ---------- Missing-fields form ----------
+  function showMissingForm(fields) {
+    actionBtn.style.display = "none";
+    missingFieldsEl.innerHTML = "";
+
+    fields.forEach(function (apiName) {
+      var wrap = document.createElement("div");
+      wrap.className = "field";
+
+      var label = document.createElement("label");
+      label.setAttribute("for", "f_" + apiName);
+      label.textContent = REQUIRED_FIELDS[apiName];
+
+      var input = document.createElement("input");
+      input.id = "f_" + apiName;
+      input.name = apiName;
+      input.type = INPUT_TYPES[apiName] || "text";
+      input.autocomplete = "off";
+
+      var err = document.createElement("div");
+      err.className = "fieldError";
+      err.id = "e_" + apiName;
+
+      wrap.appendChild(label);
+      wrap.appendChild(input);
+      wrap.appendChild(err);
+      missingFieldsEl.appendChild(wrap);
+    });
+
+    var labels = fields.map(function (f) { return REQUIRED_FIELDS[f]; }).join(", ");
+    setStatus("Missing required info: " + labels, "error");
+    mainText.textContent = "Fill in the missing info before creating the app link.";
+    missingForm.style.display = "block";
+
+    var first = missingFieldsEl.querySelector("input");
+    if (first) first.focus();
+  }
+
+  function validate(apiName, value) {
+    if (isBlank(value)) return REQUIRED_FIELDS[apiName] + " is required.";
+    if (apiName === "Email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      return "Enter a valid email address.";
+    }
+    if (apiName === "Phone" && value.replace(/[^0-9]/g, "").length < 10) {
+      return "Phone must have at least 10 digits.";
+    }
+    return null;
+  }
+
+  missingForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var updates = { id: currentRecordId };
+    var hasError = false;
+
+    missingList.forEach(function (apiName) {
+      var input = document.getElementById("f_" + apiName);
+      var errEl = document.getElementById("e_" + apiName);
+      var value = input.value.trim();
+      var msg = validate(apiName, value);
+      errEl.textContent = msg || "";
+      input.classList.toggle("invalid", !!msg);
+      if (msg) hasError = true;
+      else updates[apiName] = value;
+    });
+    if (hasError) return;
+
+    saveBtn.disabled = true;
+    setStatus("Saving...");
+
+    ZOHO.CRM.API.updateRecord({ Entity: currentModule, APIData: updates, Trigger: ["workflow"] })
+      .then(function (resp) {
+        var result = resp && resp.data && resp.data[0];
+        if (!result || result.code !== "SUCCESS") throw result || resp;
+        missingForm.style.display = "none";
+        saveBtn.disabled = false;
+        // Saving fires the Lead workflow, which may create the app in Stratus.
+        // Wait for it instead of creating a second one.
+        return waitForApplication();
+      })
+      .catch(function (err) {
+        saveBtn.disabled = false;
+        var detail = err && err.message ? " (" + err.message + ")" : "";
+        setStatus("Could not save the Lead" + detail + ". Try again.", "error");
+        console.error("updateRecord failed:", err);
+      });
+  });
+
+  // ---------- Wait for the workflow ----------
+  var POLL_INTERVAL_MS = 2000;
+  var POLL_TIMEOUT_MS = 20000;
+
+  function waitForApplication() {
+    var started = Date.now();
+    actionBtn.style.display = "none";
+    mainText.textContent = "Saved. Checking for an application link...";
+
+    function poll() {
+      setStatus("Waiting for KurvAgent to generate the application (" +
+        Math.round((Date.now() - started) / 1000) + "s)...");
+      return getRecord()
+        .then(function (record) {
+          if (hasRealAppUrl(record) || Date.now() - started >= POLL_TIMEOUT_MS) {
+            showAction(record);
+            return;
+          }
+          return new Promise(function (r) { setTimeout(r, POLL_INTERVAL_MS); }).then(poll);
+        })
+        .catch(function (err) {
+          setStatus("Could not reload the record from Zoho.", "error");
+          console.error("poll getRecord failed:", err);
+        });
+    }
+    return poll();
+  }
+
+  // ---------- Main button ----------
+  function showAction(record) {
+    actionBtn.disabled = false;
+    actionBtn.style.display = "inline-block";
+
+    if (hasRealAppUrl(record)) {
+      // Already filled in; nothing to create.
+      showUrl(record[APPLICATION_URL_FIELD]);
+      step = "proceed";
+      setStatus("App link is already filled in." + BUILD_TAG, "ok");
+      mainText.textContent = "This Lead already has an application link.";
+      actionBtn.textContent = "Complete Transition";
+      return;
+    }
+
+    step = "create";
+    setStatus("Ready." + BUILD_TAG);
+    mainText.textContent = "Click below to create the application in KurvAgent and fill in the App URL.";
+    actionBtn.textContent = "Create App Link";
+  }
+
+  function showUrl(url) {
+    urlField.value = url;
+    urlBox.style.display = "block";
+  }
+
+  copyBtn.addEventListener("click", function () {
+    urlField.select();
+    var done = function () { copyBtn.textContent = "Copied"; };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(urlField.value).then(done, function () {
+        document.execCommand("copy"); done();
+      });
+    } else {
+      document.execCommand("copy"); done();
+    }
+  });
+
+  // Calls the standalone Deluge function; resolves with the new URL.
+  function createApplication() {
+    return ZOHO.CRM.FUNCTIONS.execute(CREATE_APP_FUNCTION, {
+      arguments: JSON.stringify({ leadId: String(currentRecordId) })
+    }).then(function (resp) {
+      var output = resp && resp.details && resp.details.output;
+      var result = typeof output === "string" ? JSON.parse(output) : output;
+      if (!result || !result.success || isBlank(result.application_url)) {
+        throw new Error((result && result.message) || "No application URL returned.");
+      }
+      return result.application_url;
+    });
+  }
+
+  // Writes the URL to the Lead only if the function didn't already.
+  function ensureUrlSaved(url) {
+    return getRecord().then(function (record) {
+      if (record[APPLICATION_URL_FIELD] === url) return url;
+      var data = { id: currentRecordId };
+      data[APPLICATION_URL_FIELD] = url;
+      return ZOHO.CRM.API.updateRecord({ Entity: currentModule, APIData: data })
+        .then(function (resp) {
+          var r = resp && resp.data && resp.data[0];
+          if (!r || r.code !== "SUCCESS") throw new Error("Could not save the App URL to the Lead.");
+          return url;
+        });
+    });
+  }
+
+  actionBtn.addEventListener("click", function () {
+    actionBtn.disabled = true;
+
+    if (step === "proceed") {
+      proceed();
+      return;
+    }
+
+    setStatus("Creating application in KurvAgent...");
+    createApplication()
+      .then(ensureUrlSaved)
+      .then(function (url) {
+        showUrl(url);
+        step = "proceed";
+        if (AUTO_PROCEED) {
+          proceed();
+        } else {
+          setStatus("App link created and saved to the Lead.", "ok");
+          mainText.textContent = "The App URL is filled in.";
+          actionBtn.textContent = "Complete Transition";
+          actionBtn.disabled = false;
+        }
+      })
+      .catch(function (err) {
+        console.error("Create app link failed:", err);
+        actionBtn.disabled = false;
+        setStatus("Could not create the app link: " +
+          (err && err.message ? err.message : "unknown error") + ". Try again.", "error");
+      });
+  });
+
+  function proceed() {
+    setStatus("App link saved. Completing transition...", "ok");
+    ZOHO.CRM.BLUEPRINT.proceed()
+      .then(function () {
+        if (ZOHO.CRM.UI.Popup && ZOHO.CRM.UI.Popup.closeReload) {
+          ZOHO.CRM.UI.Popup.closeReload();
+        } else {
+          setStatus("Done. Refresh the page to see the updated stage.", "ok");
+        }
+      })
+      .catch(function (err) {
+        console.error("BLUEPRINT.proceed failed:", err);
+        actionBtn.textContent = "Complete Transition";
+        actionBtn.disabled = false;
+        setStatus("The App URL is saved, but the transition didn't complete. Click Complete Transition to try again.", "error");
+      });
+  }
+
+  ZOHO.embeddedApp.on("PageLoad", function (data) {
+    currentModule = data.Entity;
+    currentRecordId = Array.isArray(data.EntityId) ? data.EntityId[0] : data.EntityId;
+    loadRecord();
+  });
+
+  ZOHO.embeddedApp.init();
+})();
+</script>
+</body>
+</html>

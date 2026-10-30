@@ -122,7 +122,13 @@
   var AUTO_PROCEED = true;
 
   var IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  var BUILD_TAG = " (v3 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
+
+  // false = after the rep fills in missing fields, save WITHOUT firing Lead
+  // workflows and go straight to the button (no 20s wait). The widget creates
+  // the app itself, so the workflow isn't needed here and can't race it into
+  // a duplicate. Set to true to go back to saving with workflows + waiting.
+  var WAIT_FOR_WORKFLOW = false;
+  var BUILD_TAG = " (v4 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
 
   // API name -> label. Keep in sync with fieldurl-newtab.html.
   var REQUIRED_FIELDS = {
@@ -275,7 +281,7 @@
     saveBtn.disabled = true;
     setStatus("Saving...");
 
-    ZOHO.CRM.API.updateRecord({ Entity: currentModule, APIData: updates, Trigger: ["workflow"] })
+    ZOHO.CRM.API.updateRecord({ Entity: currentModule, APIData: updates, Trigger: WAIT_FOR_WORKFLOW ? ["workflow"] : [] })
       .then(function (resp) {
         var result = resp && resp.data && resp.data[0];
         if (!result || result.code !== "SUCCESS") throw result || resp;
@@ -283,7 +289,11 @@
         saveBtn.disabled = false;
         // Saving fires the Lead workflow, which may create the app in Stratus.
         // Wait for it instead of creating a second one.
-        return waitForApplication();
+        if (WAIT_FOR_WORKFLOW) return waitForApplication();
+        // Skip the 20s wait: the widget creates the app itself.
+        setStatus("Saved.");
+        return ZOHO.CRM.API.getRecord({ Entity: currentModule, RecordID: currentRecordId })
+          .then(function (r) { showAction(r.data[0]); });
       })
       .catch(function (err) {
         saveBtn.disabled = false;

@@ -155,10 +155,10 @@
   var IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
   var OPEN_WHERE = IS_MOBILE ? "" : " in a new tab";
   // Shown in the status bar so you can confirm which build/branch is running.
-  var BUILD_TAG = " (v3 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
+  var BUILD_TAG = " (v4 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
 
   // API name of the standalone function (Setup > Developer Hub > Functions).
-  var CREATE_APP_FUNCTION = "sendleadtostratusfromwidget";
+  var CREATE_APP_FUNCTION = "createapplinkfromwidget";
 
   // API name -> label. Add "Company": "Company" here to require it too.
   var REQUIRED_FIELDS = {

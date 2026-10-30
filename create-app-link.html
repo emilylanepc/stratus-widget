@@ -121,6 +121,10 @@
   // false = show the link with a "Complete Transition" button instead.
   var AUTO_PROCEED = true;
 
+  // true = if the Lead already has a real App URL, complete the transition
+  // immediately (the popup only flashes briefly) instead of waiting for a click.
+  var SKIP_IF_LINKED = true;
+
   var IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
   // false = after the rep fills in missing fields, save WITHOUT firing Lead
@@ -128,7 +132,7 @@
   // the app itself, so the workflow isn't needed here and can't race it into
   // a duplicate. Set to true to go back to saving with workflows + waiting.
   var WAIT_FOR_WORKFLOW = false;
-  var BUILD_TAG = " (v5 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
+  var BUILD_TAG = " (v6 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
 
   // API name -> label. Keep in sync with fieldurl-newtab.html.
   var REQUIRED_FIELDS = {
@@ -343,6 +347,12 @@
       setStatus("App link is already filled in." + BUILD_TAG, "ok");
       mainText.textContent = "This Lead already has an application link.";
       actionBtn.textContent = "Complete Transition";
+      if (SKIP_IF_LINKED) {
+        // Nothing to create: finish the transition right away.
+        actionBtn.style.display = "none";
+        mainText.textContent = "This Lead already has an application link.";
+        proceed();
+      }
       return;
     }
 

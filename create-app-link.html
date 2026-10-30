@@ -115,14 +115,14 @@
   // 4. Advances the blueprint and closes/reloads. Same on desktop and mobile,
   //    since nothing is opened there's no "Open links using" sheet to break.
   var APPLICATION_URL_FIELD = "Application_URL";
-  var CREATE_APP_FUNCTION = "sendleadtostratusfromwidget";
+  var CREATE_APP_FUNCTION = "createapplinkfromwidget";
 
   // true  = after the link is filled in, complete the transition automatically.
   // false = show the link with a "Complete Transition" button instead.
   var AUTO_PROCEED = true;
 
   var IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  var BUILD_TAG = " (v2 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
+  var BUILD_TAG = " (v3 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
 
   // API name -> label. Keep in sync with fieldurl-newtab.html.
   var REQUIRED_FIELDS = {

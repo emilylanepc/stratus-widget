@@ -122,7 +122,7 @@
   var AUTO_PROCEED = true;
 
   var IS_MOBILE = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  var BUILD_TAG = " (v1 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
+  var BUILD_TAG = " (v2 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
 
   // API name -> label. Keep in sync with fieldurl-newtab.html.
   var REQUIRED_FIELDS = {
@@ -146,6 +146,7 @@
   var currentRecordId = null;
   var missingList = [];
   var step = "create"; // "create" -> "proceed"
+  var createdUrl = null; // URL from Stratus; reused on retry so we never create twice
 
   function setStatus(msg, kind) {
     statusBar.textContent = msg;
@@ -159,6 +160,17 @@
     setStatus("This page must be opened inside a Zoho CRM widget, not previewed standalone.", "error");
     mainText.textContent = "Zoho SDK not detected.";
     return;
+  }
+
+  // Turns Zoho / function errors into something readable, incl. which field.
+  function describeError(err) {
+    if (!err) return "unknown error";
+    var e = err;
+    if (e.data && e.data[0]) e = e.data[0];
+    var msg = e.message || (typeof e === "string" ? e : JSON.stringify(e));
+    if (e.details && e.details.api_name) msg += " (field: " + e.details.api_name + ")";
+    if (e.code) msg += " [" + e.code + "]";
+    return msg;
   }
 
   function getRecord() {
@@ -370,8 +382,11 @@
       return ZOHO.CRM.API.updateRecord({ Entity: currentModule, APIData: data })
         .then(function (resp) {
           var r = resp && resp.data && resp.data[0];
-          if (!r || r.code !== "SUCCESS") throw new Error("Could not save the App URL to the Lead.");
+          if (!r || r.code !== "SUCCESS") throw r || resp;
           return url;
+        })
+        .catch(function (err) {
+          throw new Error("App was created, but saving the App URL failed: " + describeError(err));
         });
     });
   }
@@ -384,9 +399,17 @@
       return;
     }
 
-    setStatus("Creating application in KurvAgent...");
-    createApplication()
-      .then(ensureUrlSaved)
+    var create = createdUrl
+      ? Promise.resolve(createdUrl)
+      : (setStatus("Creating application in KurvAgent..."),
+         createApplication()
+           .catch(function (err) {
+             throw new Error("Creating the application failed: " + describeError(err));
+           })
+           .then(function (url) { createdUrl = url; return url; }));
+
+    create
+      .then(function (url) { setStatus("Saving the App URL..."); return ensureUrlSaved(url); })
       .then(function (url) {
         showUrl(url);
         step = "proceed";
@@ -402,8 +425,11 @@
       .catch(function (err) {
         console.error("Create app link failed:", err);
         actionBtn.disabled = false;
-        setStatus("Could not create the app link: " +
-          (err && err.message ? err.message : "unknown error") + ". Try again.", "error");
+        if (createdUrl) {
+          showUrl(createdUrl);
+          actionBtn.textContent = "Retry Saving App URL";
+        }
+        setStatus(describeError(err), "error");
       });
   });
 

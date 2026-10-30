@@ -161,7 +161,7 @@
   var WAIT_FOR_WORKFLOW = false;
   var OPEN_WHERE = IS_MOBILE ? "" : " in a new tab";
   // Shown in the status bar so you can confirm which build/branch is running.
-  var BUILD_TAG = " (v5 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
+  var BUILD_TAG = " (v6 · " + (IS_MOBILE ? "mobile" : "desktop") + ")";
 
   // API name of the standalone function (Setup > Developer Hub > Functions).
   var CREATE_APP_FUNCTION = "createapplinkfromwidget";
@@ -504,9 +504,8 @@
       setStatus("Advancing to Application Started...");
       ZOHO.CRM.BLUEPRINT.proceed()
         .then(function () {
-          if (ZOHO.CRM.UI.Popup && ZOHO.CRM.UI.Popup.closeReload) {
-            ZOHO.CRM.UI.Popup.closeReload();
-          }
+          setStatus("Done. Updating the Lead...");
+          reloadLead();
         })
         .catch(function (err) {
           console.error("BLUEPRINT.proceed failed:", err);
@@ -550,15 +549,36 @@
   }
 
   // Desktop only: the tab is already open, so closing/reloading the widget is safe.
+
+  // After BLUEPRINT.proceed(), Zoho can take a moment to commit the new state,
+  // and closeReload() alone sometimes reloads too early and shows the old stage.
+  // Wait briefly, then reopen the Lead (re-renders the page with the new state);
+  // fall back to closeReload() if that isn't available.
+  var RELOAD_DELAY_MS = 1200;
+  function reloadLead() {
+    setTimeout(function () {
+      var fallback = function () {
+        if (ZOHO.CRM.UI.Popup && ZOHO.CRM.UI.Popup.closeReload) {
+          ZOHO.CRM.UI.Popup.closeReload();
+        }
+      };
+      try {
+        if (ZOHO.CRM.UI.Record && ZOHO.CRM.UI.Record.open) {
+          ZOHO.CRM.UI.Record.open({ Entity: currentModule, RecordID: currentRecordId })
+            .then(fallback, fallback);
+          return;
+        }
+      } catch (e) { console.error("Record.open failed:", e); }
+      fallback();
+    }, RELOAD_DELAY_MS);
+  }
+
   function advanceBlueprint() {
     setStatus("Opened in a new tab. Advancing to Application Started...");
     ZOHO.CRM.BLUEPRINT.proceed()
       .then(function () {
-        if (ZOHO.CRM.UI.Popup && ZOHO.CRM.UI.Popup.closeReload) {
-          ZOHO.CRM.UI.Popup.closeReload();
-        } else {
-          setStatus("Done. Refresh the page to see the updated stage.");
-        }
+        setStatus("Done. Updating the Lead...");
+        reloadLead();
       })
       .catch(function (err) {
         openBtn.disabled = false;
